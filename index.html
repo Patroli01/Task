@@ -24,15 +24,25 @@
         ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
         .dark ::-webkit-scrollbar-thumb { background: #475569; }
         .dark ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+        
+        /* Animasi berdenyut untuk tombol mulai */
+        @keyframes pulse-custom {
+            0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7); }
+            70% { transform: scale(1.05); box-shadow: 0 0 0 10px rgba(59, 130, 246, 0); }
+            100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+        }
+        .animate-pulse-custom {
+            animation: pulse-custom 2s infinite;
+        }
     </style>
 </head>
 <body>
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect } = React;
+        const { useState, useEffect, useRef } = React;
 
-        // --- ICONS COMPONENTS (Inline SVG pengganti Lucide-React agar single file) ---
+        // --- ICONS COMPONENTS ---
         const Icon = ({ children, size = 20, className = "" }) => (
             <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>{children}</svg>
         );
@@ -47,6 +57,9 @@
         const AlertCircle = (props) => <Icon {...props}><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></Icon>;
         const HelpCircle = (props) => <Icon {...props}><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" x2="12.01" y1="17" y2="17"/></Icon>;
         const X = (props) => <Icon {...props}><line x1="18" x2="6" y1="6" y2="18"/><line x1="6" x2="18" y1="6" y2="18"/></Icon>;
+        const Volume2 = (props) => <Icon {...props}><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></Icon>;
+        const VolumeX = (props) => <Icon {...props}><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="22" x2="16" y1="9" y2="15"/><line x1="16" x2="22" y1="9" y2="15"/></Icon>;
+        const ShieldCheck = (props) => <Icon {...props}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></Icon>;
 
         // --- MAIN APP COMPONENT ---
         const App = () => {
@@ -60,11 +73,24 @@
             const [greeting, setGreeting] = useState('');
             const [darkMode, setDarkMode] = useState(true);
             const [showHelp, setShowHelp] = useState(false);
+            const [hasStarted, setHasStarted] = useState(false); // Menangani Autoplay Block
+            const [soundEnabled, setSoundEnabled] = useState(() => {
+                const saved = localStorage.getItem('focusTask_sound');
+                return saved !== null ? JSON.parse(saved) : true;
+            });
+
+            // Audio Refs
+            const addAudio = useRef(new Audio('https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3'));
+            const completeAudio = useRef(new Audio('https://assets.mixkit.co/active_storage/sfx/2013/2013-preview.mp3'));
 
             // Effects
             useEffect(() => {
                 localStorage.setItem('focusTask_data', JSON.stringify(tasks));
             }, [tasks]);
+
+            useEffect(() => {
+                localStorage.setItem('focusTask_sound', JSON.stringify(soundEnabled));
+            }, [soundEnabled]);
 
             useEffect(() => {
                 const hour = new Date().getHours();
@@ -74,7 +100,6 @@
                 else setGreeting('Selamat Malam');
             }, []);
 
-            // Mengatur class 'dark' di body untuk Tailwind
             useEffect(() => {
                 if (darkMode) {
                     document.documentElement.classList.add('dark');
@@ -83,7 +108,37 @@
                 }
             }, [darkMode]);
 
-            // Handlers
+            // Handlers Suara (Text-to-Speech)
+            const speakText = (text) => {
+                if (!soundEnabled || !window.speechSynthesis) return;
+                
+                // Batalkan suara yang sedang berjalan agar tidak tumpang tindih
+                window.speechSynthesis.cancel();
+                
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'id-ID'; // Menggunakan Bahasa Indonesia
+                utterance.rate = 1.0;
+                utterance.pitch = 1.0;
+                
+                window.speechSynthesis.speak(utterance);
+            };
+
+            const playSoundEffect = (type) => {
+                if (!soundEnabled) return;
+                const audio = type === 'add' ? addAudio.current : completeAudio.current;
+                audio.currentTime = 0;
+                audio.play().catch(e => console.log("Audio play blocked"));
+            };
+
+            // Memulai Sesi & Mengucapkan Sapaan Pertama
+            const startDashboard = () => {
+                setHasStarted(true);
+                // Beri jeda sedikit agar transisi mulus baru bicara
+                setTimeout(() => {
+                    speakText(`${greeting}, Jendral. Siap memantau tugas hari ini?`);
+                }, 500);
+            };
+
             const handleAddTask = (e) => {
                 e.preventDefault();
                 if (!newTask.trim()) return;
@@ -99,10 +154,23 @@
                 setTasks([item, ...tasks]);
                 setNewTask('');
                 setPriority('normal');
+                playSoundEffect('add');
             };
 
             const toggleComplete = (id) => {
-                setTasks(tasks.map(t => t.id === id ? { ...t, completed: !t.completed } : t));
+                const updatedTasks = tasks.map(t => {
+                    if (t.id === id) {
+                        const newStatus = !t.completed;
+                        if (newStatus) {
+                            playSoundEffect('complete');
+                            // Opsional: Laptop bicara saat tugas selesai
+                            // speakText(`Tugas selesai, Jendral.`);
+                        }
+                        return { ...t, completed: newStatus };
+                    }
+                    return t;
+                });
+                setTasks(updatedTasks);
             };
 
             const deleteTask = (id) => {
@@ -110,6 +178,27 @@
             };
 
             const pendingCount = tasks.filter(t => !t.completed).length;
+
+            // Tampilan Awal (Lapor Screen) untuk memicu suara
+            if (!hasStarted) {
+                return (
+                    <div className={`min-h-screen flex items-center justify-center transition-colors duration-300 ${darkMode ? 'bg-slate-900' : 'bg-blue-50'}`}>
+                        <div className="text-center p-8">
+                            <div className="mb-6 inline-flex p-5 rounded-full bg-blue-500/10 text-blue-500 animate-pulse-custom">
+                                <ShieldCheck size={64} />
+                            </div>
+                            <h1 className={`text-3xl font-bold mb-2 ${darkMode ? 'text-white' : 'text-slate-800'}`}>Lapor, Jendral!</h1>
+                            <p className={`mb-8 opacity-70 ${darkMode ? 'text-slate-400' : 'text-slate-600'}`}>Dashboard tugas siap dipantau.</p>
+                            <button 
+                                onClick={startDashboard}
+                                className="bg-blue-600 hover:bg-blue-500 text-white px-10 py-4 rounded-2xl font-bold text-lg shadow-xl shadow-blue-500/20 transition-all hover:scale-105 active:scale-95"
+                            >
+                                MASUK MARKAS
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
 
             return (
                 <div className={`min-h-screen transition-colors duration-300 ${darkMode ? 'bg-slate-900 text-slate-100' : 'bg-gray-50 text-gray-800'} font-sans relative`}>
@@ -122,8 +211,14 @@
                     </div>
                     <div className="flex items-center gap-2">
                         <button 
+                            onClick={() => setSoundEnabled(!soundEnabled)}
+                            title={soundEnabled ? "Matikan Suara" : "Aktifkan Suara"}
+                            className={`p-2 rounded-full ${darkMode ? 'bg-slate-700 hover:bg-slate-600' : 'bg-gray-200 hover:bg-gray-300'} transition`}
+                        >
+                            {soundEnabled ? <Volume2 size={20} className="text-green-400" /> : <VolumeX size={20} className="text-red-400" />}
+                        </button>
+                        <button 
                             onClick={() => setShowHelp(true)}
-                            title="Cara agar muncul otomatis"
                             className={`p-2 rounded-full ${darkMode ? 'bg-slate-700 hover:bg-slate-600 text-blue-400' : 'bg-blue-100 hover:bg-blue-200 text-blue-600'} transition`}
                         >
                             <HelpCircle size={20} />
@@ -237,67 +332,25 @@
                         </div>
                     ))}
                     </div>
-
-                    {/* Footer Stats */}
-                    {tasks.length > 0 && (
-                    <div className={`mt-8 text-center text-sm ${darkMode ? 'text-slate-600' : 'text-gray-400'}`}>
-                        {tasks.filter(t => t.completed).length}/{tasks.length} Tugas Selesai
-                        <div className="w-full h-1 bg-gray-200/20 rounded-full mt-2 overflow-hidden">
-                        <div 
-                            className="h-full bg-blue-500 transition-all duration-500"
-                            style={{ width: `${(tasks.filter(t => t.completed).length / tasks.length) * 100}%` }}
-                        ></div>
-                        </div>
-                    </div>
-                    )}
                 </div>
 
                 {/* HELP MODAL */}
                 {showHelp && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-black/60 backdrop-blur-sm transition-all">
                         <div className={`relative w-full max-w-md p-6 rounded-2xl shadow-2xl transform transition-all scale-100 ${darkMode ? 'bg-slate-800 text-slate-100 border border-slate-700' : 'bg-white text-gray-800'}`}>
-                            <button 
-                                onClick={() => setShowHelp(false)}
-                                className="absolute top-4 right-4 p-1 rounded-full hover:bg-gray-200/20 transition"
-                            >
-                                <X size={20} />
-                            </button>
-                            
-                            <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
-                                <HelpCircle className="text-blue-500" />
-                                Agar Muncul Otomatis
-                            </h3>
-                            
+                            <button onClick={() => setShowHelp(false)} className="absolute top-4 right-4 p-1 rounded-full hover:bg-gray-200/20 transition"><X size={20} /></button>
+                            <h3 className="text-xl font-bold mb-4 flex items-center gap-2"><HelpCircle className="text-blue-500" /> Agar Muncul Otomatis</h3>
                             <div className="space-y-4 text-sm leading-relaxed">
-                                <p>Supaya aplikasi ini terbuka sendiri setiap Jendral menyalakan laptop, pilih salah satu cara ini:</p>
-                                
                                 <div className={`p-4 rounded-xl ${darkMode ? 'bg-slate-900/50' : 'bg-blue-50'}`}>
-                                    <strong className="block mb-1 text-blue-500">Cara 1: Jadikan Startup Browser (Termudah)</strong>
-                                    <ol className="list-decimal pl-5 space-y-1 opacity-90">
-                                        <li>Buka aplikasi ini di Chrome/Edge.</li>
-                                        <li>Buka <b>Settings</b> browser > menu <b>On Startup</b>.</li>
-                                        <li>Pilih <i>"Open a specific page"</i>.</li>
-                                        <li>Klik <i>"Add current page"</i> saat membuka tab ini.</li>
-                                    </ol>
+                                    <strong className="block mb-1 text-blue-500">Startup Browser</strong>
+                                    <p>Settings Browser > On Startup > Open a specific page > Add current page.</p>
                                 </div>
-
                                 <div className={`p-4 rounded-xl ${darkMode ? 'bg-slate-900/50' : 'bg-purple-50'}`}>
-                                    <strong className="block mb-1 text-purple-500">Cara 2: Folder Startup Windows</strong>
-                                    <ol className="list-decimal pl-5 space-y-1 opacity-90">
-                                        <li>Simpan file ini sebagai <code>index.html</code>.</li>
-                                        <li>Tekan tombol <code>Windows + R</code> di keyboard.</li>
-                                        <li>Ketik <code>shell:startup</code> lalu Enter.</li>
-                                        <li>Copy & Paste file <code>index.html</code> tadi ke dalam folder yang terbuka.</li>
-                                    </ol>
+                                    <strong className="block mb-1 text-purple-500">Startup Windows</strong>
+                                    <p>Tekan <code>Win+R</code>, ketik <code>shell:startup</code>, lalu masukkan file <code>index.html</code> ke situ.</p>
                                 </div>
                             </div>
-                            
-                            <button 
-                                onClick={() => setShowHelp(false)}
-                                className="w-full mt-6 bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-xl font-medium transition"
-                            >
-                                Siap, Mengerti!
-                            </button>
+                            <button onClick={() => setShowHelp(false)} className="w-full mt-6 bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-xl font-medium transition">Siap, Mengerti!</button>
                         </div>
                     </div>
                 )}
